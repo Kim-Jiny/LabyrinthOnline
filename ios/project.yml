@@ -1,0 +1,49 @@
+# XcodeGen 프로젝트 정의 — 라비린스 (Labyrinth Online) iOS
+#
+#   설치:  brew install xcodegen
+#   생성:  cd ios && xcodegen generate && open LabyrinthOnline.xcodeproj
+#
+# Socket.IO-Client-Swift 를 SPM 으로 자동 연결한다.
+
+name: LabyrinthOnline
+options:
+  bundleIdPrefix: com.jiny
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+
+packages:
+  SocketIO:
+    url: https://github.com/socketio/socket.io-client-swift
+    from: "16.1.0"
+
+targets:
+  LabyrinthOnline:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    dependencies:
+      - package: SocketIO
+        product: SocketIO
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleDisplayName: 라비린스
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        # 개발용 평문 HTTP 허용(로컬 서버). 운영은 HTTPS + 도메인으로 교체.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        # 서버 주소 오버라이드(미설정 시 localhost:3000)
+        LAB_SERVER_URL: "http://localhost:3000"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jiny.labyrinthonline
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1,2"

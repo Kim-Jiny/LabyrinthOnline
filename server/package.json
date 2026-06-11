@@ -1,0 +1,32 @@
+{
+  "name": "labyrinth-online-server",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "engines": { "node": ">=18.0.0" },
+  "scripts": {
+    "dev": "NODE_ENV=development nodemon --exec ts-node src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "ts-node src/games/labyrinth/engine.test.ts && ts-node src/games/labyrinth/sim.test.ts"
+  },
+  "description": "라비린스 온라인 전용 실시간 멀티플레이어 서버 (독립 배포, DB·JWT는 듀오와 공유)",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.17.2",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.11",
+    "nodemon": "^3.1.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

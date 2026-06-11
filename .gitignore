@@ -1,0 +1,70 @@
+# =====================================================================
+#  라비린스 온라인 — .gitignore
+#  원칙: 의존성·빌드 산출물·비밀(.env)·IDE/OS 잡파일은 절대 추적하지 않는다.
+#        (Minigame 리포처럼 node_modules 가 추적되는 사고 방지)
+# =====================================================================
+
+# --- OS / 편집기 ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+*.iml
+
+# --- 비밀/환경 (절대 커밋 금지) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.keystore
+*.jks
+
+# --- Claude 로컬 설정 ---
+.claude/settings.local.json
+
+# --- 공통 의존성/빌드 ---
+node_modules/
+dist/
+build/
+out/
+coverage/
+*.log
+npm-debug.log*
+
+# =========================== 서버 (Node/TS) ===========================
+server/node_modules/
+server/dist/
+server/coverage/
+
+# ============================= iOS (Swift) ============================
+# XcodeGen(project.yml)으로 생성되는 산출물 — 추적하지 않는다.
+ios/*.xcodeproj/
+ios/*.xcworkspace/
+ios/Sources/Info.plist
+ios/.build/
+ios/DerivedData/
+ios/build/
+**/xcuserdata/
+**/*.xcuserstate
+.swiftpm/
+Package.resolved
+
+# ========================== Android (Gradle) ==========================
+android/.gradle/
+android/build/
+android/app/build/
+android/captures/
+android/local.properties
+android/.cxx/
+android/app/release/
+*.apk
+*.aab
+# Gradle 래퍼 바이너리는 커밋(빌드 재현성). properties/scripts 는 추적.
+!android/gradle/wrapper/gradle-wrapper.jar

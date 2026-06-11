@@ -1,0 +1,32 @@
+# 라비린스 온라인 — 독립 배포 컨테이너.
+#
+# 듀오(Minigame)와 "DB(duo-db) + app-network + JWT_SECRET"만 공유한다.
+# 이 컨테이너의 배포/재시작은 듀오·CTR·사자툰 서비스에 영향을 주지 않는다(배포 격리).
+#
+# 전제: 듀오 docker-compose 가 먼저 떠서 `app-network`(external)와 `duo-db` 가 존재해야 한다.
+#   - DB 는 같은 PostgreSQL(duo-db) 안에서 lab_ 테이블만 사용.
+#   - JWT_SECRET 는 듀오와 "반드시 동일한 값" 으로 주입(듀오 발급 토큰 검증용).
+
+name: labyrinth
+
+services:
+  labyrinth:
+    build: .
+    container_name: labyrinth-server
+    restart: unless-stopped
+    ports:
+      - "3002:3000"          # 듀오 3001 과 분리
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      # duo-db 컨테이너의 Postgres 를 공유. 같은 app-network 안이라 호스트명으로 접근.
+      - DATABASE_URL=${DATABASE_URL}
+      # 듀오와 동일한 JWT 시크릿(토큰 검증용)
+      - JWT_SECRET=${JWT_SECRET}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    external: true          # 듀오 compose 가 만든 네트워크에 합류
