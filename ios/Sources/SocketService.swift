@@ -36,6 +36,10 @@ final class SocketService {
     var onJoined: ((String) -> Void)?
     var onConnected: (() -> Void)?
     var onChatMessage: ((ChatMessage) -> Void)?
+    var onQueued: ((Int, Int, Int) -> Void)?   // size, waiting, need
+    var onPaused: (([Int]) -> Void)?           // disconnected seats
+    var onResumed: (() -> Void)?
+    var onAborted: (() -> Void)?
 
     private let decoder = JSONDecoder()
 
@@ -69,6 +73,21 @@ final class SocketService {
         bind("lab:moved") { [weak self] (p: MovedPayload) in self?.onState?(p.state) }
         bind("lab:chatMessage") { [weak self] (m: ChatMessage) in self?.onChatMessage?(m) }
 
+        socket.on("lab:queued") { [weak self] data, _ in
+            let d = data.first as? [String: Any]
+            self?.onQueued?(d?["size"] as? Int ?? 2, d?["waiting"] as? Int ?? 1, d?["need"] as? Int ?? 2)
+        }
+        socket.on("lab:queueUpdate") { [weak self] data, _ in
+            let d = data.first as? [String: Any]
+            self?.onQueued?(d?["size"] as? Int ?? 2, d?["waiting"] as? Int ?? 1, d?["need"] as? Int ?? 2)
+        }
+        socket.on("lab:paused") { [weak self] data, _ in
+            let d = data.first as? [String: Any]
+            self?.onPaused?(d?["disconnectedSeats"] as? [Int] ?? [])
+        }
+        socket.on("lab:resumed") { [weak self] _, _ in self?.onResumed?() }
+        socket.on("lab:aborted") { [weak self] _, _ in self?.onAborted?() }
+
         socket.on("lab:error") { [weak self] data, _ in
             if let dict = data.first as? [String: Any], let code = dict["code"] as? String {
                 self?.onError?(code)
@@ -100,7 +119,8 @@ final class SocketService {
     func joinRoom(code: String) { socket?.emit("lab:join", ["code": code]) }
     func addBot(difficulty: String = "normal") { socket?.emit("lab:addBot", ["difficulty": difficulty]) }
     func start() { socket?.emit("lab:start") }
-    func quickMatch() { socket?.emit("lab:quickmatch") }
+    func quickMatch(size: Int) { socket?.emit("lab:quickmatch", ["size": size]) }
+    func cancelQuick() { socket?.emit("lab:cancelQuick") }
     func leave() { socket?.emit("lab:leave") }
     func reconnectRoom(code: String) { socket?.emit("lab:reconnect", ["code": code]) }
 

@@ -23,6 +23,10 @@ class SocketService {
     var onError: ((String) -> Unit)? = null
     var onConnected: (() -> Unit)? = null
     var onChatMessage: ((ChatMessage) -> Unit)? = null
+    var onQueued: ((size: Int, waiting: Int, need: Int) -> Unit)? = null
+    var onPaused: (() -> Unit)? = null
+    var onResumed: (() -> Unit)? = null
+    var onAborted: (() -> Unit)? = null
 
     fun connect(token: String?, nickname: String?) {
         val opts = IO.Options().apply {
@@ -47,6 +51,14 @@ class SocketService {
         s.on("lab:inserted") { args -> obj(args)?.let { decode<StatePayload>(it)?.let { v -> onState?.invoke(v.state) } } }
         s.on("lab:moved") { args -> obj(args)?.let { decode<StatePayload>(it)?.let { v -> onState?.invoke(v.state) } } }
         s.on("lab:chatMessage") { args -> obj(args)?.let { decode<ChatMessage>(it)?.let { v -> onChatMessage?.invoke(v) } } }
+        val queueHandler = { args: Array<Any?> ->
+            obj(args)?.let { onQueued?.invoke(it.optInt("size", 2), it.optInt("waiting", 1), it.optInt("need", 2)); Unit } ?: Unit
+        }
+        s.on("lab:queued", queueHandler)
+        s.on("lab:queueUpdate", queueHandler)
+        s.on("lab:paused") { _ -> onPaused?.invoke() }
+        s.on("lab:resumed") { _ -> onResumed?.invoke() }
+        s.on("lab:aborted") { _ -> onAborted?.invoke() }
         s.on("lab:error") { args ->
             obj(args)?.optString("code")?.takeIf { it.isNotEmpty() }?.let { onError?.invoke(it) }
         }
@@ -64,7 +76,8 @@ class SocketService {
     fun joinRoom(code: String) = socket?.emit("lab:join", JSONObject().put("code", code))
     fun addBot(difficulty: String = "normal") = socket?.emit("lab:addBot", JSONObject().put("difficulty", difficulty))
     fun start() = socket?.emit("lab:start")
-    fun quickMatch() = socket?.emit("lab:quickmatch")
+    fun quickMatch(size: Int) = socket?.emit("lab:quickmatch", JSONObject().put("size", size))
+    fun cancelQuick() = socket?.emit("lab:cancelQuick")
     fun leave() = socket?.emit("lab:leave")
     fun reconnectRoom(code: String) = socket?.emit("lab:reconnect", JSONObject().put("code", code))
     fun insert(insertionId: Int, rotation: Int) =

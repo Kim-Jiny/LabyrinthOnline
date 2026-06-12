@@ -1,5 +1,6 @@
 package com.jiny.labyrinthonline.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -12,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -52,6 +54,9 @@ fun RootScreen(vm: GameViewModel, auth: AuthViewModel) {
 @Composable
 private fun LobbyScreen(vm: GameViewModel, auth: AuthViewModel) {
     var code by remember { mutableStateOf("") }
+    var quickSize by remember { mutableStateOf(2) }
+    var showStats by remember { mutableStateOf(false) }
+    if (showStats) { StatsScreen(auth) { showStats = false }; return }
     Column(
         Modifier.fillMaxSize().padding(32.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
@@ -64,6 +69,7 @@ private fun LobbyScreen(vm: GameViewModel, auth: AuthViewModel) {
                 Text(if (auth.canChat) "💬 채팅 사용 가능" else "🔒 소셜 연동 시 채팅 가능",
                     fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            TextButton({ showStats = true }) { Text("전적") }
             TextButton({ auth.signOut() }) { Text("로그아웃") }
         }
 
@@ -71,7 +77,14 @@ private fun LobbyScreen(vm: GameViewModel, auth: AuthViewModel) {
         Text(if (vm.connected) "● 서버 연결됨" else "○ 연결 중…",
             color = if (vm.connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
 
-        Button({ vm.quickMatch() }, Modifier.fillMaxWidth()) { Text("빠른 대전 (2인)") }
+        if (vm.queuing) {
+            CircularProgressIndicator()
+            Text("상대를 찾는 중… (${vm.queueWaiting}/${vm.queueNeed})")
+            TextButton({ vm.cancelQuick() }) { Text("취소") }
+        } else {
+            SingleChoiceSegmented(quickSize) { quickSize = it }
+            Button({ vm.quickMatch(quickSize) }, Modifier.fillMaxWidth()) { Text("빠른 대전 시작") }
+        }
         OutlinedButton({ vm.createRoom(4) }, Modifier.fillMaxWidth()) { Text("방 만들기") }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -142,6 +155,8 @@ private fun GameScreen(vm: GameViewModel, auth: AuthViewModel) {
             }
         }
 
+        vm.turn?.deadline?.let { TurnTimerBar(it) }
+
         BoardScreen(vm, Modifier.fillMaxWidth())
 
         // 삽입 확정 컨트롤
@@ -164,6 +179,44 @@ private fun GameScreen(vm: GameViewModel, auth: AuthViewModel) {
         if (showChat) {
             ChatPanel(vm = vm, canChat = auth.canChat,
                 modifier = Modifier.align(Alignment.BottomCenter))
+        }
+
+        if (vm.paused) {
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = Color.White)
+                    Spacer(Modifier.height(12.dp))
+                    Text("상대방 재연결을 기다리는 중…", color = Color.White)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TurnTimerBar(deadlineMs: Double) {
+    var now by remember { mutableStateOf(System.currentTimeMillis().toDouble()) }
+    LaunchedEffect(deadlineMs) {
+        while (true) { now = System.currentTimeMillis().toDouble(); kotlinx.coroutines.delay(500) }
+    }
+    val remaining = ((deadlineMs - now) / 1000.0).coerceAtLeast(0.0)
+    val frac = (remaining / 60.0).coerceIn(0.0, 1.0).toFloat()
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        LinearProgressIndicator(
+            progress = { frac },
+            modifier = Modifier.fillMaxWidth(),
+            color = if (remaining < 10) Color.Red else MaterialTheme.colorScheme.primary
+        )
+        Text("${remaining.toInt()}초", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun SingleChoiceSegmented(selected: Int, onSelect: (Int) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(2, 3, 4).forEach { n ->
+            if (n == selected) Button({ onSelect(n) }) { Text("${n}인") }
+            else OutlinedButton({ onSelect(n) }) { Text("${n}인") }
         }
     }
 }

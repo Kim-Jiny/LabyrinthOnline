@@ -19,6 +19,11 @@ final class GameViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var connected = false
     @Published var chatMessages: [ChatMessage] = []
+    // 대기열 / 일시정지
+    @Published var queuing = false
+    @Published var queueWaiting = 0
+    @Published var queueNeed = 0
+    @Published var paused = false
 
     // 삽입 단계 임시 선택(회전 미리보기)
     @Published var pendingRotation: Int = 0
@@ -44,6 +49,7 @@ final class GameViewModel: ObservableObject {
         service.onRoom = { [weak self] in self?.roomInfo = $0; self?.screen = .room }
         service.onState = { [weak self] snap in
             self?.snapshot = snap
+            self?.queuing = false
             if snap.phase == .finished { return }
             if self?.screen != .game { self?.screen = .game }
         }
@@ -57,6 +63,14 @@ final class GameViewModel: ObservableObject {
         service.onChatMessage = { [weak self] msg in
             self?.chatMessages.append(msg)
             if (self?.chatMessages.count ?? 0) > 100 { self?.chatMessages.removeFirst() }
+        }
+        service.onQueued = { [weak self] _, waiting, need in
+            self?.queuing = true; self?.queueWaiting = waiting; self?.queueNeed = need
+        }
+        service.onPaused = { [weak self] _ in self?.paused = true }
+        service.onResumed = { [weak self] in self?.paused = false }
+        service.onAborted = { [weak self] in
+            self?.errorMessage = "GAME_ABORTED"; self?.leave()
         }
         service.onError = { [weak self] in self?.errorMessage = $0 }
         service.onCreated = { _ in }
@@ -73,8 +87,9 @@ final class GameViewModel: ObservableObject {
     func joinRoom(code: String) { service.joinRoom(code: code.uppercased()) }
     func addBot() { service.addBot() }
     func start() { service.start() }
-    func quickMatch() { service.quickMatch() }
-    func leave() { service.leave(); screen = .lobby; snapshot = nil; roomInfo = nil }
+    func quickMatch(size: Int) { queuing = true; service.quickMatch(size: size) }
+    func cancelQuick() { queuing = false; service.cancelQuick() }
+    func leave() { service.leave(); screen = .lobby; snapshot = nil; roomInfo = nil; queuing = false; paused = false }
 
     /// 삽입 지점 탭: 처음 탭이면 선택, 같은 지점 재탭이면 회전.
     func tapInsertion(_ id: Int) {

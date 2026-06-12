@@ -27,6 +27,10 @@ class GameViewModel : ViewModel() {
     var errorMessage by mutableStateOf<String?>(null)
     var connected by mutableStateOf(false); private set
     val chatMessages = mutableStateListOf<ChatMessage>()
+    var queuing by mutableStateOf(false); private set
+    var queueWaiting by mutableStateOf(0); private set
+    var queueNeed by mutableStateOf(0); private set
+    var paused by mutableStateOf(false); private set
 
     // 삽입 단계 임시 선택
     var selectedInsertion by mutableStateOf<Int?>(null); private set
@@ -48,9 +52,14 @@ class GameViewModel : ViewModel() {
         service.onState = { snap ->
             main.post {
                 snapshot = snap
+                queuing = false
                 if (snap.phase != Phase.FINISHED && screen != Screen.GAME) screen = Screen.GAME
             }
         }
+        service.onQueued = { _, waiting, need -> main.post { queuing = true; queueWaiting = waiting; queueNeed = need } }
+        service.onPaused = { main.post { paused = true } }
+        service.onResumed = { main.post { paused = false } }
+        service.onAborted = { main.post { errorMessage = "GAME_ABORTED"; leave() } }
         service.onTurn = { t ->
             main.post {
                 turn = t
@@ -72,8 +81,9 @@ class GameViewModel : ViewModel() {
     fun joinRoom(code: String) { service.joinRoom(code.uppercase()) }
     fun addBot() { service.addBot() }
     fun start() { service.start() }
-    fun quickMatch() { service.quickMatch() }
-    fun leave() { service.leave(); screen = Screen.LOBBY; snapshot = null; roomInfo = null }
+    fun quickMatch(size: Int) { queuing = true; service.quickMatch(size) }
+    fun cancelQuick() { queuing = false; service.cancelQuick() }
+    fun leave() { service.leave(); screen = Screen.LOBBY; snapshot = null; roomInfo = null; queuing = false; paused = false }
 
     fun tapInsertion(id: Int) {
         if (!isMyTurn || snapshot?.phase != Phase.INSERT) return

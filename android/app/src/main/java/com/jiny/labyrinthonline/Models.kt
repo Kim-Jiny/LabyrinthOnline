@@ -135,6 +135,23 @@ data class MeResponse(val user: LabUser)
 @Serializable
 data class ApiError(val error: String)
 
+// 전적
+@Serializable
+data class LabStats(
+    val gamesPlayed: Int,
+    val wins: Int,
+    val losses: Int,
+    val treasuresCollected: Int,
+    val bestTurns: Int? = null,
+    val elo: Int,
+)
+@Serializable
+data class StatsResponse(val stats: LabStats? = null)
+@Serializable
+data class LeaderboardEntry(val userId: Int, val nickname: String, val wins: Int, val gamesPlayed: Int)
+@Serializable
+data class LeaderboardResponse(val leaderboard: List<LeaderboardEntry> = emptyList())
+
 /** 보드 상수 (서버와 동일) */
 object Board {
     const val SIZE = 7

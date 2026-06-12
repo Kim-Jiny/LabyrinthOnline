@@ -8,6 +8,7 @@ import cors from 'cors';
 import { setupDatabase } from './config/database';
 import { setupLabyrinthNamespace } from './socket/labyrinth';
 import authRouter from './routes/auth';
+import statsRouter from './routes/stats';
 
 // 전역 에러 안전망 — 소켓/타이머 콜백 에러로 프로세스가 죽지 않게.
 process.on('unhandledRejection', (reason) => console.error('[unhandledRejection]', reason));
@@ -35,6 +36,8 @@ app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 // 인증 API
 app.use('/api/lab/auth', authRouter);
+// 전적 API
+app.use('/api/lab/stats', statsRouter);
 
 // 라비린스 전용 네임스페이스 /labyrinth
 setupLabyrinthNamespace(io);

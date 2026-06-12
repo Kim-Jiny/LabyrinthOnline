@@ -47,11 +47,29 @@ interface LabRoom {
   turnDeadline: number | null;
   botRng: () => number;
   botTimers: NodeJS.Timeout[];
+  // 재연결 유예
+  paused: boolean;
+  pausedRemainingMs: number | null;     // 일시정지 시점의 남은 턴 시간
+  graceTimers: Map<number, NodeJS.Timeout>; // seat → grace 만료 타이머
+  createdAt: number;                    // 방 생성 시각(버려진 방 정리용)
 }
 
+const RECONNECT_GRACE_MS = 60000;       // 끊긴 플레이어 대기
+const WAITING_ROOM_TTL_MS = 10 * 60000; // 시작 안 한 방 정리
+
 const rooms = new Map<string, LabRoom>();
-// 빠른대전 대기열(2인)
-const quickQueue: Array<{ socket: Socket; userId: number | null; nickname: string }> = [];
+// 빠른대전 대기열 — 인원수(2/3/4)별로 분리
+interface QueueEntry { socket: Socket; userId: number | null; nickname: string }
+const quickQueues = new Map<number, QueueEntry[]>([[2, []], [3, []], [4, []]]);
+
+function newRoom(code: string, hostUserKey: string, seats: LabSeat[], maxPlayers: number): LabRoom {
+  return {
+    code, hostUserKey, seats, maxPlayers,
+    status: 'waiting', game: null, seed: 0, matchId: null,
+    turnTimer: null, turnDeadline: null, botRng: makeRng(1), botTimers: [],
+    paused: false, pausedRemainingMs: null, graceTimers: new Map(), createdAt: Date.now(),
+  };
+}
 
 function genRoomCode(): string {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -131,10 +149,11 @@ function clearTimers(room: LabRoom) {
   room.turnDeadline = null;
 }
 
-function startTurn(nsp: Namespace, room: LabRoom) {
+function startTurn(nsp: Namespace, room: LabRoom, remainingMs: number = TURN_TIME_MS) {
   if (!room.game || room.game.isGameOver()) return;
+  if (room.paused) return; // 재연결 대기 중이면 시작하지 않음
   clearTimers(room);
-  room.turnDeadline = Date.now() + TURN_TIME_MS;
+  room.turnDeadline = Date.now() + remainingMs;
   emitTurn(room);
   broadcastState(room);
 
@@ -144,7 +163,7 @@ function startTurn(nsp: Namespace, room: LabRoom) {
   // 턴 타임아웃 → 강제 스킵
   room.turnTimer = setTimeout(() => {
     safe('turnTimeout', () => {
-      if (!room.game || room.game.isGameOver()) return;
+      if (!room.game || room.game.isGameOver() || room.paused) return;
       room.game.forceSkip();
       if (room.game.isGameOver()) {
         finishGame(nsp, room);
@@ -152,12 +171,43 @@ function startTurn(nsp: Namespace, room: LabRoom) {
         startTurn(nsp, room);
       }
     });
-  }, TURN_TIME_MS);
+  }, remainingMs);
 
   // 봇 차례면 자동 진행
   if (seatObj && seatObj.isBot) {
     scheduleBotTurn(nsp, room, seat);
   }
+}
+
+// 재연결 대기: 진행 중 게임을 일시정지(턴 타이머 보존).
+function pauseRoom(nsp: Namespace, room: LabRoom) {
+  if (room.paused || !room.game || room.game.isGameOver()) return;
+  room.pausedRemainingMs = room.turnDeadline ? Math.max(0, room.turnDeadline - Date.now()) : TURN_TIME_MS;
+  room.paused = true;
+  clearTimers(room);
+  const disconnected = room.seats.filter((s) => !s.isBot && !s.connected).map((s) => s.seat);
+  for (const s of room.seats) {
+    if (s.socket) s.socket.emit('lab:paused', { disconnectedSeats: disconnected });
+  }
+}
+
+// 모든 사람이 접속해 있으면 재개.
+function resumeRoom(nsp: Namespace, room: LabRoom) {
+  if (!room.paused) return;
+  const stillOut = room.seats.some((s) => !s.isBot && !s.connected);
+  if (stillOut) return;
+  room.paused = false;
+  const remaining = room.pausedRemainingMs ?? TURN_TIME_MS;
+  room.pausedRemainingMs = null;
+  for (const s of room.seats) {
+    if (s.socket) s.socket.emit('lab:resumed', {});
+  }
+  startTurn(nsp, room, Math.max(3000, remaining)); // 복귀 후 최소 3초 보장
+}
+
+function clearGrace(room: LabRoom, seat: number) {
+  const t = room.graceTimers.get(seat);
+  if (t) { clearTimeout(t); room.graceTimers.delete(seat); }
 }
 
 function scheduleBotTurn(nsp: Namespace, room: LabRoom, seat: number) {
@@ -332,8 +382,10 @@ function findSeatBySocket(room: LabRoom, socket: Socket): LabSeat | undefined {
 }
 
 function removeFromQuickQueue(socket: Socket) {
-  const i = quickQueue.findIndex((q) => q.socket.id === socket.id);
-  if (i >= 0) quickQueue.splice(i, 1);
+  for (const q of quickQueues.values()) {
+    const i = q.findIndex((e) => e.socket.id === socket.id);
+    if (i >= 0) q.splice(i, 1);
+  }
 }
 
 export function setupLabyrinthNamespace(io: Server) {
@@ -370,25 +422,12 @@ export function setupLabyrinthNamespace(io: Server) {
 
     // 방 만들기
     socket.on('lab:create', (data: { maxPlayers?: number } = {}) => safe('create', () => {
-      const maxPlayers = Math.min(MAX_PLAYERS, Math.max(2, data.maxPlayers ?? 4));
+      const maxPlayers = Math.min(MAX_PLAYERS, Math.max(2, Math.floor(data.maxPlayers ?? 4)));
       const code = genRoomCode();
-      const room: LabRoom = {
-        code,
-        hostUserKey: socket.id,
-        seats: [{
-          seat: 0, socket, userId: userId(), nickname: nickname(),
-          isBot: false, difficulty: 'normal', connected: true,
-        }],
-        maxPlayers,
-        status: 'waiting',
-        game: null,
-        seed: 0,
-        matchId: null,
-        turnTimer: null,
-        turnDeadline: null,
-        botRng: makeRng(1),
-        botTimers: [],
-      };
+      const room = newRoom(code, socket.id, [{
+        seat: 0, socket, userId: userId(), nickname: nickname(),
+        isBot: false, difficulty: 'normal', connected: true,
+      }], maxPlayers);
       rooms.set(code, room);
       socket.join(`lab:${code}`);
       (socket.data as any).roomCode = code;
@@ -437,28 +476,29 @@ export function setupLabyrinthNamespace(io: Server) {
       if (!res.ok) socket.emit('lab:error', { code: res.error });
     }));
 
-    // 빠른대전(2인): 큐에 넣고 2명 모이면 자동 시작
-    socket.on('lab:quickmatch', () => safe('quickmatch', async () => {
+    // 빠른대전: 원하는 인원(2/3/4)을 골라 큐 대기 → 인원 차면 자동 시작
+    socket.on('lab:quickmatch', (data: { size?: number } = {}) => safe('quickmatch', async () => {
+      const size = [2, 3, 4].includes(Math.floor(data.size ?? 2)) ? Math.floor(data.size ?? 2) : 2;
       removeFromQuickQueue(socket);
-      quickQueue.push({ socket, userId: userId(), nickname: nickname() });
-      socket.emit('lab:queued', {});
-      if (quickQueue.length >= 2) {
-        const a = quickQueue.shift()!;
-        const b = quickQueue.shift()!;
+      const queue = quickQueues.get(size)!;
+      queue.push({ socket, userId: userId(), nickname: nickname() });
+      socket.emit('lab:queued', { size, waiting: queue.length, need: size });
+      // 대기 인원수 변동을 큐 전체에 알림
+      for (const e of queue) e.socket.emit('lab:queueUpdate', { size, waiting: queue.length, need: size });
+
+      if (queue.length >= size) {
+        const picked = queue.splice(0, size);
         const code = genRoomCode();
-        const room: LabRoom = {
-          code, hostUserKey: a.socket.id,
-          seats: [
-            { seat: 0, socket: a.socket, userId: a.userId, nickname: a.nickname, isBot: false, difficulty: 'normal', connected: true },
-            { seat: 1, socket: b.socket, userId: b.userId, nickname: b.nickname, isBot: false, difficulty: 'normal', connected: true },
-          ],
-          maxPlayers: 2, status: 'waiting', game: null, seed: 0, matchId: null,
-          turnTimer: null, turnDeadline: null, botRng: makeRng(1), botTimers: [],
-        };
+        const seats: LabSeat[] = picked.map((e, i) => ({
+          seat: i, socket: e.socket, userId: e.userId, nickname: e.nickname,
+          isBot: false, difficulty: 'normal', connected: true,
+        }));
+        const room = newRoom(code, picked[0].socket.id, seats, size);
         rooms.set(code, room);
-        a.socket.join(`lab:${code}`); b.socket.join(`lab:${code}`);
-        (a.socket.data as any).roomCode = code;
-        (b.socket.data as any).roomCode = code;
+        for (const e of picked) {
+          e.socket.join(`lab:${code}`);
+          (e.socket.data as any).roomCode = code;
+        }
         await startGame(nsp, room);
       }
     }));
@@ -469,29 +509,35 @@ export function setupLabyrinthNamespace(io: Server) {
     }));
 
     // 타일 삽입
-    socket.on('lab:insert', (data: { insertionId: number; rotation: Rotation }) => safe('insert', () => {
+    socket.on('lab:insert', (data: { insertionId?: unknown; rotation?: unknown }) => safe('insert', () => {
       const room = rooms.get((socket.data as any).roomCode);
-      if (!room || !room.game) return;
+      if (!room || !room.game || room.paused) return;
       const seat = findSeatBySocket(room, socket);
       if (!seat) return;
-      const res = room.game.insert(seat.seat, {
-        insertionId: data.insertionId,
-        rotation: data.rotation,
-      });
+      const insertionId = Number(data?.insertionId);
+      const rotation = Number(data?.rotation);
+      if (!Number.isInteger(insertionId) || !Number.isInteger(rotation)) {
+        return socket.emit('lab:error', { code: 'BAD_INPUT' });
+      }
+      const res = room.game.insert(seat.seat, { insertionId, rotation: rotation as Rotation });
       if (!res.ok) return socket.emit('lab:error', { code: res.error });
-      broadcastInserted(room, seat.seat, data.insertionId, data.rotation);
+      broadcastInserted(room, seat.seat, insertionId, rotation as Rotation);
       emitTurn(room);
     }));
 
     // 말 이동
-    socket.on('lab:move', (data: { to: number }) => safe('move', () => {
+    socket.on('lab:move', (data: { to?: unknown }) => safe('move', () => {
       const room = rooms.get((socket.data as any).roomCode);
-      if (!room || !room.game) return;
+      if (!room || !room.game || room.paused) return;
       const seat = findSeatBySocket(room, socket);
       if (!seat) return;
-      const res = room.game.move(seat.seat, data.to);
+      const to = Number(data?.to);
+      if (!Number.isInteger(to) || to < 0 || to >= 49) {
+        return socket.emit('lab:error', { code: 'BAD_INPUT' });
+      }
+      const res = room.game.move(seat.seat, to);
       if (!res.ok) return socket.emit('lab:error', { code: res.error });
-      broadcastMoved(room, seat.seat, data.to, res.collected ?? null);
+      broadcastMoved(room, seat.seat, to, res.collected ?? null);
       if (res.gameOver) {
         finishGame(nsp, room);
       } else {
@@ -509,10 +555,12 @@ export function setupLabyrinthNamespace(io: Server) {
       seat.socket = socket;
       seat.connected = true;
       room.game.setConnected(seat.seat, true);
+      clearGrace(room, seat.seat);
       socket.join(`lab:${room.code}`);
       (socket.data as any).roomCode = room.code;
       socket.emit('lab:state', room.game.snapshot(seat.seat));
       emitTurn(room);
+      tryResume(nsp, room); // 모두 복귀했으면 게임 재개
     }));
 
     socket.on('lab:leave', () => safe('leave', () => handleLeave(nsp, socket)));
@@ -522,6 +570,13 @@ export function setupLabyrinthNamespace(io: Server) {
       if (!(socket.data as any).chatEnabled) {
         return socket.emit('lab:error', { code: 'CHAT_NOT_ALLOWED' });
       }
+      // 레이트리밋: 3초당 5개
+      const now = Date.now();
+      const times: number[] = ((socket.data as any).chatTimes ??= []);
+      while (times.length && now - times[0] > 3000) times.shift();
+      if (times.length >= 5) return socket.emit('lab:error', { code: 'CHAT_RATE_LIMITED' });
+      times.push(now);
+
       const room = rooms.get((socket.data as any).roomCode);
       if (!room) return;
       const text = (data?.text ?? '').toString().trim().slice(0, 300);
@@ -543,6 +598,17 @@ export function setupLabyrinthNamespace(io: Server) {
       handleLeave(nsp, socket);
     }));
   });
+
+  // 버려진 대기방 주기적 정리(시작 안 한 채 오래된 방).
+  setInterval(() => safe('sweep', () => {
+    const now = Date.now();
+    for (const [code, room] of rooms) {
+      if (room.status === 'waiting' && now - room.createdAt > WAITING_ROOM_TTL_MS) {
+        for (const s of room.seats) if (s.socket) s.socket.emit('lab:error', { code: 'ROOM_EXPIRED' });
+        rooms.delete(code);
+      }
+    }
+  }), 60000);
 
   console.log('🧩 [LAB] Labyrinth namespace /labyrinth ready');
 }
@@ -569,15 +635,61 @@ function handleLeave(nsp: Namespace, socket: Socket) {
       emitRoom(nsp, room);
     }
   } else if (room.status === 'playing') {
-    // 진행 중: 연결만 끊김 표시(좌석 유지 → 재연결 가능). 봇이 대신 두지는 않고
-    // 턴 타임아웃에 맡긴다.
+    // 진행 중: 연결 끊김 표시(좌석 유지 → 재연결 가능).
     seat.socket = null;
     seat.connected = false;
     if (room.game) room.game.setConnected(seat.seat, false);
-    // 남은 인간 접속자가 0이면 방 정리
+
+    // 아무 사람도 안 남으면 매치 중단
     if (room.seats.filter((s) => !s.isBot && s.connected).length === 0) {
-      clearTimers(room);
-      rooms.delete(code);
+      abortRoom(nsp, room);
+      return;
     }
+    // 남은 사람이 있으면 게임 일시정지 + 유예 타이머(시간 내 복귀하면 재개)
+    pauseRoom(nsp, room);
+    clearGrace(room, seat.seat);
+    const t = setTimeout(() => safe('grace', () => {
+      room.graceTimers.delete(seat.seat); // 유예 만료 → 해당 좌석 포기(턴 오면 자동 스킵)
+      const anyHumanConnected = room.seats.some((s) => !s.isBot && s.connected);
+      if (!anyHumanConnected && room.graceTimers.size === 0) {
+        abortRoom(nsp, room);
+        return;
+      }
+      tryResume(nsp, room);
+    }), RECONNECT_GRACE_MS);
+    room.graceTimers.set(seat.seat, t);
   }
+}
+
+// 재개 시도: 유예 대기 중인 끊긴 좌석이 없으면 게임 재개.
+function tryResume(nsp: Namespace, room: LabRoom) {
+  if (!room.paused || !room.game || room.game.isGameOver()) return;
+  const waiting = room.seats.some((s) => !s.isBot && !s.connected && room.graceTimers.has(s.seat));
+  if (waiting) return;
+  room.paused = false;
+  const remaining = room.pausedRemainingMs ?? TURN_TIME_MS;
+  room.pausedRemainingMs = null;
+  for (const s of room.seats) if (s.socket) s.socket.emit('lab:resumed', {});
+  startTurn(nsp, room, Math.max(3000, remaining));
+}
+
+// 매치 중단(전원 이탈): DB에 aborted 기록 후 방 정리.
+function abortRoom(nsp: Namespace, room: LabRoom) {
+  clearTimers(room);
+  for (const t of room.graceTimers.values()) clearTimeout(t);
+  room.graceTimers.clear();
+  for (const s of room.seats) if (s.socket) s.socket.emit('lab:aborted', {});
+  if (room.matchId !== null && room.status === 'playing') {
+    labService.finishMatch({
+      matchId: room.matchId, winnerUserId: null, turnCount: room.game?.snapshot(null).turn ?? 0,
+      status: 'aborted',
+      seats: room.seats.map((s) => ({
+        seat: s.seat, userId: s.userId, isBot: s.isBot,
+        collected: room.game?.getPlayerState(s.seat)?.collected ?? 0,
+        placement: 0, result: 'abort' as const,
+      })),
+    }).catch(() => {});
+  }
+  room.status = 'finished';
+  rooms.delete(room.code);
 }

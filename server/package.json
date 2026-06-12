@@ -9,7 +9,8 @@
     "dev": "NODE_ENV=development nodemon --exec ts-node src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "ts-node src/games/labyrinth/engine.test.ts && ts-node src/games/labyrinth/sim.test.ts"
+    "typecheck": "tsc --noEmit",
+    "test": "ts-node src/games/labyrinth/engine.test.ts && ts-node src/games/labyrinth/sim.test.ts && ts-node src/socket/integration.test.ts"
   },
   "description": "라비린스 온라인 전용 실시간 멀티플레이어 서버 (독립 배포·자체 인증, 공유 PostgreSQL의 lab_ 테이블만 사용)",
   "license": "ISC",
@@ -32,6 +33,7 @@
     "@types/node": "^22.0.0",
     "@types/pg": "^8.11.11",
     "nodemon": "^3.1.11",
+    "socket.io-client": "^4.8.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }

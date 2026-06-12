@@ -60,6 +60,8 @@ struct LobbyView: View {
     @ObservedObject var vm: GameViewModel
     @ObservedObject var auth: AuthService
     @State private var joinCode = ""
+    @State private var quickSize = 2
+    @State private var showStats = false
 
     var body: some View {
         VStack(spacing: 24) {
@@ -71,18 +73,33 @@ struct LobbyView: View {
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button { showStats = true } label: { Image(systemName: "chart.bar.fill") }
                 Button("로그아웃") { auth.signOut() }.font(.caption)
             }
+            .sheet(isPresented: $showStats) { StatsView() }
 
             Text("라비린스").font(.system(size: 40, weight: .heavy, design: .rounded))
             Text(vm.connected ? "● 서버 연결됨" : "○ 연결 중…")
                 .font(.caption).foregroundStyle(vm.connected ? .green : .secondary)
 
-            Button { vm.quickMatch() } label: {
-                Label("빠른 대전 (2인)", systemImage: "bolt.fill")
-                    .frame(maxWidth: .infinity)
+            if vm.queuing {
+                VStack(spacing: 8) {
+                    ProgressView()
+                    Text("상대를 찾는 중… (\(vm.queueWaiting)/\(vm.queueNeed))")
+                        .font(.subheadline)
+                    Button("취소") { vm.cancelQuick() }.font(.caption)
+                }
+                .padding(.vertical, 8)
+            } else {
+                Picker("인원", selection: $quickSize) {
+                    Text("2인").tag(2); Text("3인").tag(3); Text("4인").tag(4)
+                }
+                .pickerStyle(.segmented)
+                Button { vm.quickMatch(size: quickSize) } label: {
+                    Label("빠른 대전 시작", systemImage: "bolt.fill").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
             }
-            .buttonStyle(.borderedProminent)
 
             Button { vm.createRoom(maxPlayers: 4) } label: {
                 Label("방 만들기", systemImage: "plus.circle")
@@ -150,12 +167,24 @@ struct GameScreen: View {
     var body: some View {
         VStack(spacing: 12) {
             header
+            if let deadline = vm.turn?.deadline { TurnTimerBar(deadlineMs: deadline) }
             BoardView(vm: vm)
                 .padding(.horizontal, 8)
             controls
             Spacer(minLength: 0)
         }
         .padding(.vertical, 8)
+        .overlay {
+            if vm.paused {
+                ZStack {
+                    Color.black.opacity(0.5).ignoresSafeArea()
+                    VStack(spacing: 12) {
+                        ProgressView().tint(.white)
+                        Text("상대방 재연결을 기다리는 중…").foregroundStyle(.white)
+                    }
+                }
+            }
+        }
         .overlay(alignment: .bottomTrailing) {
             Button { showChat = true } label: {
                 Image(systemName: "bubble.left.and.bubble.right.fill")
@@ -221,6 +250,32 @@ struct GameScreen: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(vm.selectedInsertion == nil)
+            }
+            .padding(.horizontal, 16)
+        }
+    }
+}
+
+// MARK: - 턴 타이머 바
+
+struct TurnTimerBar: View {
+    let deadlineMs: Double   // 서버 epoch ms
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.5)) { context in
+            let remaining = max(0, deadlineMs / 1000 - context.date.timeIntervalSince1970)
+            let total = 60.0
+            VStack(spacing: 2) {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(.gray.opacity(0.2))
+                        Capsule()
+                            .fill(remaining < 10 ? Color.red : Color.accentColor)
+                            .frame(width: geo.size.width * min(1, remaining / total))
+                    }
+                }
+                .frame(height: 6)
+                Text("\(Int(remaining))초").font(.caption2).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 16)
         }

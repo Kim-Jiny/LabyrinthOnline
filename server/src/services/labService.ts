@@ -157,3 +157,27 @@ export async function getUserStats(userId: number): Promise<LabUserStats | null>
     elo: r.elo,
   };
 }
+
+export interface LeaderboardEntry {
+  userId: number;
+  nickname: string;
+  wins: number;
+  gamesPlayed: number;
+}
+
+// 승수 기준 상위 랭킹(닉네임은 lab_users 조인).
+export async function getLeaderboard(limit = 20): Promise<LeaderboardEntry[]> {
+  const pool = getPool();
+  if (!pool) return [];
+  const res = await pool.query(
+    `SELECT s.user_id, u.nickname, s.wins, s.games_played
+       FROM lab_user_stats s JOIN lab_users u ON u.id = s.user_id
+      WHERE s.games_played > 0
+      ORDER BY s.wins DESC, s.games_played ASC
+      LIMIT $1`,
+    [Math.min(100, Math.max(1, limit))]
+  );
+  return res.rows.map((r) => ({
+    userId: r.user_id, nickname: r.nickname, wins: r.wins, gamesPlayed: r.games_played,
+  }));
+}
