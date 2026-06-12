@@ -18,6 +18,7 @@ final class GameViewModel: ObservableObject {
     @Published var gameOver: GameOver?
     @Published var errorMessage: String?
     @Published var connected = false
+    @Published var chatMessages: [ChatMessage] = []
 
     // 삽입 단계 임시 선택(회전 미리보기)
     @Published var pendingRotation: Int = 0
@@ -53,6 +54,10 @@ final class GameViewModel: ObservableObject {
             self?.pendingRotation = self?.snapshot?.spare.rotation ?? 0
         }
         service.onGameOver = { [weak self] in self?.gameOver = $0; self?.screen = .result }
+        service.onChatMessage = { [weak self] msg in
+            self?.chatMessages.append(msg)
+            if (self?.chatMessages.count ?? 0) > 100 { self?.chatMessages.removeFirst() }
+        }
         service.onError = { [weak self] in self?.errorMessage = $0 }
         service.onCreated = { _ in }
         service.onJoined = { _ in }
@@ -94,5 +99,10 @@ final class GameViewModel: ObservableObject {
     func moveTo(_ index: Int) {
         guard isMyTurn, snapshot?.phase == .move else { return }
         service.move(to: index)
+    }
+    func sendChat(_ text: String) {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        service.sendChat(t)
     }
 }

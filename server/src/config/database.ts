@@ -33,6 +33,30 @@ export async function setupDatabase(): Promise<void> {
 
     // === lab_ 테이블만 생성 (남의 스키마 미수정) ===
     await client.query(`
+      -- 라비린스 자체 계정. login_id/password 는 아이디·비번 가입용(소셜 전용이면 NULL).
+      -- chat_enabled: 소셜(카카오/구글/애플) 1개 이상 연동 시 TRUE → 채팅 허용.
+      CREATE TABLE IF NOT EXISTS lab_users (
+        id SERIAL PRIMARY KEY,
+        login_id VARCHAR(30) UNIQUE,
+        password_hash TEXT,
+        nickname VARCHAR(50) NOT NULL,
+        chat_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- 소셜 연동(provider별 1계정에 여러 개 가능). 같은 소셜계정은 한 유저에만.
+      CREATE TABLE IF NOT EXISTS lab_social_links (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES lab_users(id) ON DELETE CASCADE,
+        provider VARCHAR(10) NOT NULL,            -- kakao|google|apple
+        provider_user_id VARCHAR(255) NOT NULL,
+        email VARCHAR(255),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(provider, provider_user_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_lab_social_user ON lab_social_links(user_id);
+
       CREATE TABLE IF NOT EXISTS lab_matches (
         id SERIAL PRIMARY KEY,
         room_code VARCHAR(12) UNIQUE NOT NULL,

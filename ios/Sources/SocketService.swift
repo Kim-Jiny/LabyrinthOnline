@@ -35,6 +35,7 @@ final class SocketService {
     var onCreated: ((String) -> Void)?
     var onJoined: ((String) -> Void)?
     var onConnected: (() -> Void)?
+    var onChatMessage: ((ChatMessage) -> Void)?
 
     private let decoder = JSONDecoder()
 
@@ -66,6 +67,7 @@ final class SocketService {
         bind("lab:gameover") { [weak self] (g: GameOver) in self?.onGameOver?(g) }
         bind("lab:inserted") { [weak self] (p: InsertedPayload) in self?.onState?(p.state) }
         bind("lab:moved") { [weak self] (p: MovedPayload) in self?.onState?(p.state) }
+        bind("lab:chatMessage") { [weak self] (m: ChatMessage) in self?.onChatMessage?(m) }
 
         socket.on("lab:error") { [weak self] data, _ in
             if let dict = data.first as? [String: Any], let code = dict["code"] as? String {
@@ -106,6 +108,7 @@ final class SocketService {
         socket?.emit("lab:insert", ["insertionId": insertionId, "rotation": rotation])
     }
     func move(to: Int) { socket?.emit("lab:move", ["to": to]) }
+    func sendChat(_ text: String) { socket?.emit("lab:chat", ["text": text]) }
 
     // MARK: 디코딩 헬퍼
 

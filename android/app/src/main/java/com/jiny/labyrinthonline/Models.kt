@@ -107,6 +107,34 @@ data class GameOver(
 @Serializable
 data class StatePayload(val state: LabyrinthSnapshot)
 
+@Serializable
+data class ChatMessage(
+    val nickname: String,
+    val seat: Int? = null,
+    val text: String,
+    val ts: Double,
+)
+
+// 인증 ---------------------------------------------------------------
+@Serializable
+data class LabUser(
+    val id: Int,
+    val loginId: String? = null,
+    val nickname: String,
+    val chatEnabled: Boolean,
+    val hasPassword: Boolean,
+    val socials: List<String> = emptyList(),
+)
+
+@Serializable
+data class AuthResponse(val token: String? = null, val user: LabUser)
+
+@Serializable
+data class MeResponse(val user: LabUser)
+
+@Serializable
+data class ApiError(val error: String)
+
 /** 보드 상수 (서버와 동일) */
 object Board {
     const val SIZE = 7

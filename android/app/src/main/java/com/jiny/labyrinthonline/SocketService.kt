@@ -22,6 +22,7 @@ class SocketService {
     var onGameOver: ((GameOver) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
     var onConnected: (() -> Unit)? = null
+    var onChatMessage: ((ChatMessage) -> Unit)? = null
 
     fun connect(token: String?, nickname: String?) {
         val opts = IO.Options().apply {
@@ -45,6 +46,7 @@ class SocketService {
         s.on("lab:gameover") { args -> obj(args)?.let { decode<GameOver>(it)?.let { v -> onGameOver?.invoke(v) } } }
         s.on("lab:inserted") { args -> obj(args)?.let { decode<StatePayload>(it)?.let { v -> onState?.invoke(v.state) } } }
         s.on("lab:moved") { args -> obj(args)?.let { decode<StatePayload>(it)?.let { v -> onState?.invoke(v.state) } } }
+        s.on("lab:chatMessage") { args -> obj(args)?.let { decode<ChatMessage>(it)?.let { v -> onChatMessage?.invoke(v) } } }
         s.on("lab:error") { args ->
             obj(args)?.optString("code")?.takeIf { it.isNotEmpty() }?.let { onError?.invoke(it) }
         }
@@ -68,6 +70,7 @@ class SocketService {
     fun insert(insertionId: Int, rotation: Int) =
         socket?.emit("lab:insert", JSONObject().put("insertionId", insertionId).put("rotation", rotation))
     fun move(to: Int) = socket?.emit("lab:move", JSONObject().put("to", to))
+    fun sendChat(text: String) = socket?.emit("lab:chat", JSONObject().put("text", text))
 
     // 헬퍼
     private fun obj(args: Array<Any?>): JSONObject? = args.firstOrNull() as? JSONObject

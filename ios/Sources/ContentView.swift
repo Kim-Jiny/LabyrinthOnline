@@ -5,25 +5,40 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var vm = GameViewModel()
+    @ObservedObject private var auth = AuthService.shared
+    @State private var didConnect = false
 
     var body: some View {
-        ZStack {
-            switch vm.screen {
-            case .lobby:  LobbyView(vm: vm)
-            case .room:   RoomView(vm: vm)
-            case .game:   GameScreen(vm: vm)
-            case .result: ResultView(vm: vm)
+        Group {
+            if auth.isAuthenticated {
+                ZStack {
+                    switch vm.screen {
+                    case .lobby:  LobbyView(vm: vm, auth: auth)
+                    case .room:   RoomView(vm: vm)
+                    case .game:   GameScreen(vm: vm)
+                    case .result: ResultView(vm: vm)
+                    }
+                }
+                .onAppear { connectIfNeeded() }
+            } else {
+                LoginView(auth: auth)
             }
         }
-        .onAppear {
-            // TODO: 듀오 로그인 토큰을 Keychain 에서 읽어 전달. 우선 게스트로 연결.
-            vm.connect(token: nil, nickname: UIDevice.current.name)
+        .task { await auth.restoreSession() }
+        .onChange(of: auth.isAuthenticated) { authed in
+            if authed { connectIfNeeded() }
         }
         .alert("오류", isPresented: .constant(vm.errorMessage != nil)) {
             Button("확인") { vm.errorMessage = nil }
         } message: {
             Text(errorText(vm.errorMessage ?? ""))
         }
+    }
+
+    private func connectIfNeeded() {
+        guard auth.isAuthenticated, !didConnect else { return }
+        didConnect = true
+        vm.connect(token: auth.token, nickname: auth.user?.nickname)
     }
 
     private func errorText(_ code: String) -> String {
@@ -43,10 +58,22 @@ struct ContentView: View {
 
 struct LobbyView: View {
     @ObservedObject var vm: GameViewModel
+    @ObservedObject var auth: AuthService
     @State private var joinCode = ""
 
     var body: some View {
         VStack(spacing: 24) {
+            // 계정 헤더
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(auth.user?.nickname ?? "").font(.headline)
+                    Text(auth.canChat ? "💬 채팅 사용 가능" : "🔒 소셜 연동 시 채팅 가능")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("로그아웃") { auth.signOut() }.font(.caption)
+            }
+
             Text("라비린스").font(.system(size: 40, weight: .heavy, design: .rounded))
             Text(vm.connected ? "● 서버 연결됨" : "○ 연결 중…")
                 .font(.caption).foregroundStyle(vm.connected ? .green : .secondary)
@@ -117,6 +144,8 @@ struct RoomView: View {
 
 struct GameScreen: View {
     @ObservedObject var vm: GameViewModel
+    @ObservedObject private var auth = AuthService.shared
+    @State private var showChat = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -127,6 +156,22 @@ struct GameScreen: View {
             Spacer(minLength: 0)
         }
         .padding(.vertical, 8)
+        .overlay(alignment: .bottomTrailing) {
+            Button { showChat = true } label: {
+                Image(systemName: "bubble.left.and.bubble.right.fill")
+                    .padding(14)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(alignment: .topTrailing) {
+                        if !vm.chatMessages.isEmpty {
+                            Circle().fill(.red).frame(width: 8, height: 8)
+                        }
+                    }
+            }
+            .padding(20)
+        }
+        .sheet(isPresented: $showChat) {
+            ChatView(vm: vm, canChat: auth.canChat)
+        }
     }
 
     private var header: some View {

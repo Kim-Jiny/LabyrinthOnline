@@ -111,6 +111,14 @@ struct TurnInfo: Codable, Equatable {
     let deadline: Double?
 }
 
+struct ChatMessage: Codable, Equatable, Identifiable {
+    let nickname: String
+    let seat: Int?
+    let text: String
+    let ts: Double
+    var id: String { "\(ts)-\(nickname)-\(text.hashValue)" }
+}
+
 struct GameOver: Codable, Equatable {
     struct Standing: Codable, Equatable { let seat: Int; let placement: Int; let nickname: String; let collected: Int }
     let winner: Int?

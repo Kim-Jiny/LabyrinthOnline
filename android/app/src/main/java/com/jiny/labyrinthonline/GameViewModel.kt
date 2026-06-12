@@ -4,6 +4,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
@@ -25,6 +26,7 @@ class GameViewModel : ViewModel() {
     var gameOver by mutableStateOf<GameOver?>(null); private set
     var errorMessage by mutableStateOf<String?>(null)
     var connected by mutableStateOf(false); private set
+    val chatMessages = mutableStateListOf<ChatMessage>()
 
     // 삽입 단계 임시 선택
     var selectedInsertion by mutableStateOf<Int?>(null); private set
@@ -57,6 +59,10 @@ class GameViewModel : ViewModel() {
             }
         }
         service.onGameOver = { g -> main.post { gameOver = g; screen = Screen.RESULT } }
+        service.onChatMessage = { m -> main.post {
+            chatMessages.add(m)
+            if (chatMessages.size > 100) chatMessages.removeAt(0)
+        } }
         service.onError = { code -> main.post { errorMessage = code } }
         service.connect(token, nickname ?: ("Android-" + Build.MODEL))
     }
@@ -91,6 +97,10 @@ class GameViewModel : ViewModel() {
     fun moveTo(index: Int) {
         if (!isMyTurn || snapshot?.phase != Phase.MOVE) return
         service.move(index)
+    }
+    fun sendChat(text: String) {
+        val t = text.trim()
+        if (t.isNotEmpty()) service.sendChat(t)
     }
 
     override fun onCleared() { service.disconnect() }

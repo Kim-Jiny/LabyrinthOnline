@@ -5,6 +5,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -16,12 +17,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.jiny.labyrinthonline.AuthViewModel
 import com.jiny.labyrinthonline.GameViewModel
 import com.jiny.labyrinthonline.Phase
 import com.jiny.labyrinthonline.Screen
 
 @Composable
-fun RootScreen(vm: GameViewModel) {
+fun RootScreen(vm: GameViewModel, auth: AuthViewModel) {
+    if (!auth.isAuthenticated) {
+        LoginScreen(auth)
+        return
+    }
+    // 인증되면 소켓 연결(1회)
+    LaunchedEffect(auth.isAuthenticated) {
+        if (auth.isAuthenticated) vm.connect(auth.token, auth.user?.nickname)
+    }
+
     vm.errorMessage?.let { code ->
         AlertDialog(
             onDismissRequest = { vm.errorMessage = null },
@@ -31,21 +42,31 @@ fun RootScreen(vm: GameViewModel) {
         )
     }
     when (vm.screen) {
-        Screen.LOBBY -> LobbyScreen(vm)
+        Screen.LOBBY -> LobbyScreen(vm, auth)
         Screen.ROOM -> RoomScreen(vm)
-        Screen.GAME -> GameScreen(vm)
+        Screen.GAME -> GameScreen(vm, auth)
         Screen.RESULT -> ResultScreen(vm)
     }
 }
 
 @Composable
-private fun LobbyScreen(vm: GameViewModel) {
+private fun LobbyScreen(vm: GameViewModel, auth: AuthViewModel) {
     var code by remember { mutableStateOf("") }
     Column(
         Modifier.fillMaxSize().padding(32.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // 계정 헤더
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(auth.user?.nickname ?: "", fontWeight = FontWeight.Bold)
+                Text(if (auth.canChat) "💬 채팅 사용 가능" else "🔒 소셜 연동 시 채팅 가능",
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            TextButton({ auth.signOut() }) { Text("로그아웃") }
+        }
+
         Text("라비린스", fontSize = 40.sp, fontWeight = FontWeight.Black)
         Text(if (vm.connected) "● 서버 연결됨" else "○ 연결 중…",
             color = if (vm.connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
@@ -92,8 +113,10 @@ private fun RoomScreen(vm: GameViewModel) {
 }
 
 @Composable
-private fun GameScreen(vm: GameViewModel) {
+private fun GameScreen(vm: GameViewModel, auth: AuthViewModel) {
     val snap = vm.snapshot ?: return
+    var showChat by remember { mutableStateOf(false) }
+    Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().padding(8.dp)) {
         // 헤더
         val cur = snap.players.firstOrNull { it.index == snap.currentPlayer }
@@ -128,6 +151,52 @@ private fun GameScreen(vm: GameViewModel) {
                 Button({ vm.confirmInsertion() }, enabled = vm.selectedInsertion != null, modifier = Modifier.weight(1f)) {
                     Text("밀어넣기 확정")
                 }
+            }
+        }
+    }
+
+        // 채팅 토글 버튼
+        FloatingActionButton(
+            onClick = { showChat = !showChat },
+            modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp)
+        ) { Text(if (showChat) "✕" else "💬") }
+
+        if (showChat) {
+            ChatPanel(vm = vm, canChat = auth.canChat,
+                modifier = Modifier.align(Alignment.BottomCenter))
+        }
+    }
+}
+
+@Composable
+private fun ChatPanel(vm: GameViewModel, canChat: Boolean, modifier: Modifier = Modifier) {
+    var draft by remember { mutableStateOf("") }
+    Surface(
+        modifier = modifier.fillMaxWidth().fillMaxHeight(0.5f),
+        tonalElevation = 6.dp,
+        shadowElevation = 8.dp
+    ) {
+        Column(Modifier.fillMaxSize().padding(12.dp)) {
+            Text("채팅", fontWeight = FontWeight.Bold)
+            LazyColumn(Modifier.weight(1f).fillMaxWidth(), reverseLayout = false) {
+                items(vm.chatMessages) { msg ->
+                    Column(Modifier.padding(vertical = 4.dp)) {
+                        Text(msg.nickname, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(msg.text)
+                    }
+                }
+            }
+            if (canChat) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(draft, { draft = it }, modifier = Modifier.weight(1f),
+                        placeholder = { Text("메시지") }, singleLine = true)
+                    Spacer(Modifier.width(8.dp))
+                    Button({ vm.sendChat(draft); draft = "" }, enabled = draft.isNotBlank()) { Text("전송") }
+                }
+            } else {
+                Text("🔒 소셜(카카오/구글/애플) 연동 계정만 채팅할 수 있어요.",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(8.dp))
             }
         }
     }

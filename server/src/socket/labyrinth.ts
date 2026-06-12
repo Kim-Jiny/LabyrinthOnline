@@ -16,6 +16,7 @@ import { chooseInsertion, chooseMove, BotDifficulty } from '../games/labyrinth/b
 import { makeRng } from '../games/labyrinth/board';
 import { Rotation } from '../games/labyrinth/types';
 import { verifyToken } from '../utils/jwt';
+import { getUser } from '../services/authService';
 import * as labService from '../services/labService';
 
 const TURN_TIME_MS = 60000;      // 한 턴(삽입+이동) 제한
@@ -338,14 +339,28 @@ function removeFromQuickQueue(socket: Socket) {
 export function setupLabyrinthNamespace(io: Server) {
   const nsp = io.of('/labyrinth');
 
-  // 핸드셰이크 인증. 토큰이 유효하면 그 안의 userId 만 신뢰(전적 귀속용).
-  // 닉네임은 클라이언트가 보낸 값을 표시용으로 쓴다 — 다른 서비스(dm_users)를 읽지 않는다.
-  nsp.use((socket, next) => {
-    const token = socket.handshake.auth?.token as string | undefined;
-    const payload = token ? verifyToken(token) : null;
-    (socket.data as any).userId = payload?.userId ?? null;
-    const nick = (socket.handshake.auth?.nickname as string | undefined)?.trim();
-    (socket.data as any).nickname = nick && nick.length > 0 ? nick : 'Guest';
+  // 핸드셰이크 인증. lab 자체 JWT 검증 → 계정의 닉네임/채팅권한을 DB에서 최신 조회.
+  // 토큰이 없으면 게스트(봇 연습 가능, 채팅 불가).
+  nsp.use(async (socket, next) => {
+    try {
+      const token = socket.handshake.auth?.token as string | undefined;
+      const payload = token ? verifyToken(token) : null;
+      if (payload) {
+        const user = await getUser(payload.userId).catch(() => null);
+        (socket.data as any).userId = user ? user.id : null;
+        (socket.data as any).nickname = user ? user.nickname : 'Guest';
+        (socket.data as any).chatEnabled = user ? user.chatEnabled : false;
+      } else {
+        const nick = (socket.handshake.auth?.nickname as string | undefined)?.trim();
+        (socket.data as any).userId = null;
+        (socket.data as any).nickname = nick && nick.length > 0 ? nick : 'Guest';
+        (socket.data as any).chatEnabled = false;
+      }
+    } catch {
+      (socket.data as any).userId = null;
+      (socket.data as any).nickname = 'Guest';
+      (socket.data as any).chatEnabled = false;
+    }
     next();
   });
 
@@ -501,6 +516,27 @@ export function setupLabyrinthNamespace(io: Server) {
     }));
 
     socket.on('lab:leave', () => safe('leave', () => handleLeave(nsp, socket)));
+
+    // 채팅 — 소셜 연동 계정(chatEnabled)만 가능. 같은 방에 broadcast.
+    socket.on('lab:chat', (data: { text?: string }) => safe('chat', () => {
+      if (!(socket.data as any).chatEnabled) {
+        return socket.emit('lab:error', { code: 'CHAT_NOT_ALLOWED' });
+      }
+      const room = rooms.get((socket.data as any).roomCode);
+      if (!room) return;
+      const text = (data?.text ?? '').toString().trim().slice(0, 300);
+      if (!text) return;
+      const seat = findSeatBySocket(room, socket);
+      const msg = {
+        nickname: nickname(),
+        seat: seat ? seat.seat : null,
+        text,
+        ts: Date.now(),
+      };
+      for (const s of room.seats) {
+        if (s.socket) s.socket.emit('lab:chatMessage', msg);
+      }
+    }));
 
     socket.on('disconnect', () => safe('disconnect', () => {
       removeFromQuickQueue(socket);

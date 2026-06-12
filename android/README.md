@@ -46,8 +46,22 @@ gradle wrapper        # 최초 1회(또는 Android Studio가 자동 생성)
 2. **이동 단계**: 초록 테두리(도달 가능) 칸을 탭해 이동. 목표 보물 칸에 닿으면 자동
    수집, 다음 보물로. 모든 보물 수집 후 홈 코너 도달 시 승리.
 
+## 인증 & 채팅
+
+- 로그인/회원가입 화면(`ui/LoginScreen`)에서 **아이디/비번** 또는 **소셜**로 진입. 토큰은
+  SharedPreferences(`AuthViewModel`)에 저장되고 소켓 핸드셰이크 `auth.token` 으로 전달된다.
+- **채팅은 소셜(카카오/구글/애플) 연동 계정만** 가능(`user.chatEnabled`). 게임 화면 우하단
+  💬 FAB → `ChatPanel`.
+- **소셜 SDK 설정(앱 단계, `SocialAuth.kt` 의 TODO):**
+  - **Google**: Credential Manager(`GoogleIdOption`)로 받은 `idToken` 반환. 서버
+    `GOOGLE_CLIENT_IDS` 에 Android 클라이언트 ID 등록.
+  - **Kakao**: Kakao SDK `UserApiClient.loginWithKakaoTalk` 의 accessToken 반환. 매니페스트에
+    리다이렉트 액티비티/키 등록.
+  - **Apple**: 안드로이드는 네이티브 미지원 → 웹 OAuth(Custom Tabs)로 identity token 획득.
+- 보안: 현재 토큰을 평문 SharedPreferences 에 저장. 운영 전 `EncryptedSharedPreferences`
+  (androidx.security-crypto)로 교체 권장.
+
 ## TODO
 
-- 듀오 로그인 토큰 연동(현재 게스트 연결).
 - 보물/타일 아트 에셋 교체.
-- 재연결(`lab:reconnect`) 자동화.
+- 재연결(`lab:reconnect`) 자동화, 턴 타이머 카운트다운 표시.
